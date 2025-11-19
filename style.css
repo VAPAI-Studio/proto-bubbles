@@ -1,0 +1,40 @@
+:root {
+  --coke-red: #F40009;
+}
+
+body, html {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background-color: var(--coke-red);
+  font-family: 'Inter', sans-serif;
+}
+
+#app {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+canvas {
+  display: block;
+  /* Ensure canvas covers the screen or maintains aspect ratio if needed */
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Optional: Force 9:16 aspect ratio container if strictly required on desktop */
+@media (min-aspect-ratio: 9/16) {
+    /* If screen is wider than 9:16, we might want to constrain it to look like a phone? 
+       User said "full screen but 9:16". 
+       Interpretation: The content should be 9:16, maybe centered on black/red background?
+       Or just full screen on a phone. 
+       Let's make the canvas fill the screen but we'll handle the "9:16" logic in Three.js or just let it be responsive.
+       Actually, "full screen but 9:16" usually implies a mobile-first vertical layout. 
+       I will make the canvas fill the window. */
+}
