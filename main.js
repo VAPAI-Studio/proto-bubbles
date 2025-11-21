@@ -23,15 +23,17 @@ const CONFIG = {
 // --- Globals ---
 let scene, camera, renderer, composer;
 let bubbles = [];
-let bodyPose, bodySegmentation;
+let bodyPose, bodySegmentation, depthEstimation;
 let poses = [];
 let segmentationResult;
+let depthResult;
 let video;
 let visibleWidth, visibleHeight;
 let bloomPass;
 let gui;
 let skeletonGroup;
 let segmentationDebugCanvas;
+let depthDebugCanvas;
 
 // --- Initialization ---
 async function init() {
@@ -97,6 +99,20 @@ async function init() {
     segmentationDebugCanvas.style.zIndex = '1000';
     document.body.appendChild(segmentationDebugCanvas);
 
+    // Depth Debug Canvas
+    depthDebugCanvas = document.createElement('canvas');
+    depthDebugCanvas.id = 'depth-debug';
+    depthDebugCanvas.style.position = 'absolute';
+    depthDebugCanvas.style.top = '0';
+    depthDebugCanvas.style.left = '0';
+    depthDebugCanvas.style.width = '100%';
+    depthDebugCanvas.style.height = '100%';
+    depthDebugCanvas.style.pointerEvents = 'none';
+    depthDebugCanvas.style.opacity = '0.6';
+    depthDebugCanvas.style.display = 'none';
+    depthDebugCanvas.style.zIndex = '999';
+    document.body.appendChild(depthDebugCanvas);
+
     createBubbles();
 
     await setupML5();
@@ -135,7 +151,7 @@ function setupGUI() {
     bloomFolder.add(CONFIG, 'bloomThreshold', 0.0, 1.0).name('Threshold').onChange(v => bloomPass.threshold = v);
 
     const debugFolder = gui.addFolder('Debug');
-    const debugObj = { showOverlay: true, showSkeleton: false, showSegmentation: false };
+    const debugObj = { showOverlay: true, showSkeleton: false, showSegmentation: false, showDepth: false };
     debugFolder.add(debugObj, 'showOverlay').name('Show Logs').onChange(v => {
         if (debugOverlay) debugOverlay.style.display = v ? 'block' : 'none';
     });
@@ -145,6 +161,11 @@ function setupGUI() {
     debugFolder.add(debugObj, 'showSegmentation').name('Show Segmentation').onChange(v => {
         if (segmentationDebugCanvas) {
             segmentationDebugCanvas.style.display = v ? 'block' : 'none';
+        }
+    });
+    debugFolder.add(debugObj, 'showDepth').name('Show Depth').onChange(v => {
+        if (depthDebugCanvas) {
+            depthDebugCanvas.style.display = v ? 'block' : 'none';
         }
     });
 }
@@ -191,7 +212,8 @@ function createBubbles() {
             wobbleOffset: Math.random() * Math.PI * 2,
             randomOffset: Math.random() * 100,
             birthTime: baseTime - indexOffset - birthRandomOffset,  // Stagger across full lifespan
-            lifespanMultiplier: 0.5 + Math.random() * 1.0  // Random 0.5-1.5x multiplier for more variation
+            lifespanMultiplier: 0.5 + Math.random() * 1.0,  // Random 0.5-1.5x multiplier for more variation
+            depth: 0.5  // Default mid-depth, will be updated on spawn
         };
 
         scene.add(mesh);
@@ -271,6 +293,14 @@ async function setupML5() {
     } catch (e) {
         log(`Error init segmentation: ${e.message}`);
     }
+
+    // Initialize Depth Estimation
+    log('Loading Depth Estimation...');
+    try {
+        depthEstimation = ml5.depthEstimation(video, { filterType: 'person' }, depthLoaded);
+    } catch (e) {
+        log(`Error init depth estimation: ${e.message}`);
+    }
 }
 
 function modelLoaded(model) {
@@ -295,6 +325,21 @@ function segmentationLoaded(model) {
         bodySegmentation.detectStart(video, gotSegmentation);
     } else {
         console.warn('detectStart not available on bodySegmentation!');
+    }
+}
+
+function depthLoaded(model) {
+    log('Depth Estimation Loaded!');
+    if (model) depthEstimation = model;
+    console.log('Depth model:', depthEstimation);
+    console.log('Has detectStart?', typeof depthEstimation.detectStart);
+    console.log('Available methods:', Object.keys(depthEstimation));
+
+    if (depthEstimation && typeof depthEstimation.detectStart === 'function') {
+        console.log('Starting depth detection...');
+        depthEstimation.detectStart(video, gotDepth);
+    } else {
+        console.warn('detectStart not available on depthEstimation!');
     }
 }
 
@@ -376,6 +421,63 @@ function gotSegmentation(result) {
     }
 }
 
+function gotDepth(result) {
+    depthResult = result;
+
+    // Debug: Log depth data structure occasionally
+    if (result && Math.random() < 0.05) {
+        console.log('📏 Depth Result:', {
+            hasDepth: !!result.depth,
+            depthType: result.depth ? typeof result.depth : 'none',
+            isImageData: result.depth instanceof ImageData,
+            keys: result.depth ? Object.keys(result.depth) : [],
+            width: result.depth?.width,
+            height: result.depth?.height,
+            hasData: !!(result.depth?.data)
+        });
+    }
+
+    // Debug: Visualize depth map
+    if (depthDebugCanvas && depthDebugCanvas.style.display !== 'none' && result && result.depth) {
+        const ctx = depthDebugCanvas.getContext('2d');
+
+        // Set canvas size to match video
+        if (depthDebugCanvas.width !== video.videoWidth) {
+            depthDebugCanvas.width = video.videoWidth;
+            depthDebugCanvas.height = video.videoHeight;
+            console.log('Depth canvas resized to:', video.videoWidth, 'x', video.videoHeight);
+        }
+
+        // Clear canvas first
+        ctx.clearRect(0, 0, depthDebugCanvas.width, depthDebugCanvas.height);
+
+        // Create temp canvas for the depth image
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = video.videoWidth;
+        tempCanvas.height = video.videoHeight;
+        const tempCtx = tempCanvas.getContext('2d');
+
+        // Draw depth image (ML5 provides it in different formats)
+        if (result.depth instanceof ImageData) {
+            tempCtx.putImageData(result.depth, 0, 0);
+        } else if (result.depth.data) {
+            // Create ImageData from raw data
+            const imageData = new ImageData(
+                new Uint8ClampedArray(result.depth.data),
+                result.depth.width,
+                result.depth.height
+            );
+            tempCtx.putImageData(imageData, 0, 0);
+        }
+
+        // Mirror horizontally
+        ctx.save();
+        ctx.scale(-1, 1);
+        ctx.drawImage(tempCanvas, -depthDebugCanvas.width, 0);
+        ctx.restore();
+    }
+}
+
 function detectLoop() {
     if (video && video.readyState >= 2 && bodyPose && typeof bodyPose.detect === 'function') {
         bodyPose.detect(video, (results) => {
@@ -429,6 +531,16 @@ function animate() {
 
         bubble.position.x += Math.sin(time * bubble.userData.wobbleSpeed + bubble.userData.wobbleOffset) * 0.01;
         bubble.position.z += Math.cos(time * bubble.userData.wobbleSpeed + bubble.userData.randomOffset) * 0.01;
+
+        // Apply depth-based scaling
+        if (bubble.userData.depth !== undefined) {
+            // Scale based on depth: closer objects (higher depth value) are larger
+            // depth ranges from 0 (far) to 1 (close)
+            // Scale factor: 0.5x to 2.0x based on depth
+            const depthScale = 0.5 + (bubble.userData.depth * 1.5);
+            const targetScale = bubble.userData.initialScale * depthScale;
+            bubble.scale.setScalar(targetScale);
+        }
 
         // Check lifespan
         if (CONFIG.bubbleLifespan > 0) {
@@ -600,12 +712,34 @@ function respawnBubble(bubble) {
 
                     bubble.position.x = (normX - 0.5) * visibleWidth;
                     bubble.position.y = (normY - 0.5) * visibleHeight;
+
+                    // Sample depth at this position
+                    let depthValue = 0.5; // Default mid-depth
+                    if (depthResult && depthResult.depth && depthResult.depth.data) {
+                        const depthData = depthResult.depth.data;
+                        const depthW = depthResult.depth.width;
+                        const depthH = depthResult.depth.height;
+
+                        // Map mx, my to depth coordinates (they might be different resolutions)
+                        const depthX = Math.floor((mx / w) * depthW);
+                        const depthY = Math.floor((my / h) * depthH);
+                        const depthIndex = (depthY * depthW + depthX) * 4;
+
+                        // Depth is typically stored in grayscale (r=g=b), normalized 0-255
+                        // Lower values = closer, higher values = farther
+                        depthValue = depthData[depthIndex] / 255.0;
+                    }
+
+                    // Store depth in bubble userData (inverted: closer = higher value for larger bubbles)
+                    bubble.userData.depth = 1.0 - depthValue; // Closer objects have higher depth value
+
                     spawned = true;
 
                     if (Math.random() < 0.01) { // Log 1% of spawns
                         console.log('✅ Spawned:', {
                             mx, my, normX: normX.toFixed(2), normY: normY.toFixed(2),
-                            x: bubble.position.x.toFixed(1), y: bubble.position.y.toFixed(1)
+                            x: bubble.position.x.toFixed(1), y: bubble.position.y.toFixed(1),
+                            depth: bubble.userData.depth.toFixed(2)
                         });
                     }
                 }
