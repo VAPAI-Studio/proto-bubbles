@@ -34,6 +34,8 @@ let gui;
 let skeletonGroup;
 let segmentationDebugCanvas;
 let depthDebugCanvas;
+let availableCameras = [];
+let currentCameraIndex = 0;
 
 // --- Initialization ---
 async function init() {
@@ -139,6 +141,26 @@ function setupGUI() {
     spawnFolder.add(CONFIG, 'spawnOnBody').name('Spawn on Body');
     spawnFolder.add(CONFIG, 'invertMask').name('Invert Mask');
 
+    // Camera selection folder
+    const cameraFolder = gui.addFolder('Camera');
+    const cameraObj = {
+        currentCamera: 'Camera 0',
+        switchCamera: () => {
+            currentCameraIndex = (currentCameraIndex + 1) % availableCameras.length;
+            switchToCamera(currentCameraIndex);
+        }
+    };
+    cameraFolder.add(cameraObj, 'switchCamera').name('Next Camera');
+
+    // Display available cameras
+    window.addEventListener('load', () => {
+        if (availableCameras.length > 0) {
+            availableCameras.forEach((cam, i) => {
+                log(`Camera ${i}: ${cam.label || 'Unknown'}`);
+            });
+        }
+    });
+
     const visualFolder = gui.addFolder('Visuals');
     visualFolder.addColor(CONFIG, 'cokeRed').name('Bg Color').onChange(c => {
         scene.background.set(c);
@@ -238,6 +260,40 @@ function log(msg) {
     }
 }
 
+async function switchToCamera(cameraIndex) {
+    if (!availableCameras.length) {
+        log('No cameras available');
+        return;
+    }
+
+    log(`Switching to camera ${cameraIndex}: ${availableCameras[cameraIndex].label || 'Unknown'}`);
+
+    // Stop current stream
+    if (video && video.srcObject) {
+        video.srcObject.getTracks().forEach(track => track.stop());
+    }
+
+    try {
+        const constraints = {
+            video: { deviceId: { exact: availableCameras[cameraIndex].deviceId } }
+        };
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        video.srcObject = stream;
+
+        await new Promise((resolve) => {
+            video.onloadedmetadata = () => {
+                video.play();
+                resolve();
+            };
+        });
+
+        log(`Now using: ${availableCameras[cameraIndex].label || `Camera ${cameraIndex}`}`);
+    } catch (err) {
+        console.error('Error switching camera:', err);
+        log(`Error switching camera: ${err.message}`);
+    }
+}
+
 async function setupML5() {
     log('Setting up ML5...');
 
@@ -248,9 +304,25 @@ async function setupML5() {
     video.setAttribute('playsinline', '');
     document.body.appendChild(video);
 
+    // Enumerate available cameras
+    try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        availableCameras = devices.filter(device => device.kind === 'videoinput');
+        log(`Found ${availableCameras.length} camera(s)`);
+        availableCameras.forEach((cam, i) => {
+            log(`  ${i}: ${cam.label || `Camera ${i}`}`);
+        });
+    } catch (err) {
+        console.error('Error enumerating devices:', err);
+    }
+
     try {
         log('Requesting webcam access...');
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+        const constraints = availableCameras.length > 0 && availableCameras[currentCameraIndex].deviceId
+            ? { video: { deviceId: { exact: availableCameras[currentCameraIndex].deviceId } } }
+            : { video: { facingMode: 'user' } };
+
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
         video.srcObject = stream;
 
         await new Promise((resolve) => {
