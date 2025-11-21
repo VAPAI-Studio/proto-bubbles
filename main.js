@@ -307,7 +307,13 @@ async function setupML5() {
     // Enumerate available cameras
     try {
         const devices = await navigator.mediaDevices.enumerateDevices();
-        availableCameras = devices.filter(device => device.kind === 'videoinput');
+        const validCameras = devices.filter(
+          (device) =>
+            device.kind === "videoinput" &&
+            (!device.label ||
+              (!device.label.match(/hdmi/i) && !device.label.match(/real/i)))
+        );
+        availableCameras = validCameras;
         log(`Found ${availableCameras.length} camera(s)`);
         availableCameras.forEach((cam, i) => {
             log(`  ${i}: ${cam.label || `Camera ${i}`}`);
