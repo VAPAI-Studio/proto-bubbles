@@ -6,9 +6,9 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 
 // --- Configuration ---
 const CONFIG = {
-    bubbleCount: 400,
-    bubbleSpeed: 2.5,
-    bubbleSize: 0.6,
+    bubbleCount: 1000,
+    bubbleSpeed: 1.27,
+    bubbleSize: 0.7,
     interactionRadius: 4.0,
     cokeRed: 0xF40009,
     bubbleColor: 0xffffff,
@@ -16,8 +16,8 @@ const CONFIG = {
     bloomRadius: 0.4,
     bloomThreshold: 0.85,
     spawnOnBody: true,
-    invertMask: false,
-    bubbleLifespan: 8.0  // seconds, 0 = infinite
+    invertMask: true,
+    bubbleLifespan: 0.7  // seconds, 0 = infinite
 };
 
 // --- Globals ---
@@ -126,6 +126,7 @@ async function init() {
 
 function setupGUI() {
     gui = new GUI({ title: 'Coke Bubbles Settings' });
+    gui.close(); // Start with GUI closed
 
     const bubbleFolder = gui.addFolder('Bubbles');
     bubbleFolder.add(CONFIG, 'bubbleCount', 50, 1000, 10).name('Count').onFinishChange(createBubbles);
@@ -151,10 +152,12 @@ function setupGUI() {
     bloomFolder.add(CONFIG, 'bloomThreshold', 0.0, 1.0).name('Threshold').onChange(v => bloomPass.threshold = v);
 
     const debugFolder = gui.addFolder('Debug');
-    const debugObj = { showOverlay: true, showSkeleton: false, showSegmentation: false, showDepth: false };
+    const debugObj = { showOverlay: false, showSkeleton: false, showSegmentation: false, showDepth: false };
     debugFolder.add(debugObj, 'showOverlay').name('Show Logs').onChange(v => {
         if (debugOverlay) debugOverlay.style.display = v ? 'block' : 'none';
     });
+    // Hide logs by default
+    if (debugOverlay) debugOverlay.style.display = 'none';
     debugFolder.add(debugObj, 'showSkeleton').name('Show Skeleton').onChange(v => {
         skeletonGroup.visible = v;
     });
